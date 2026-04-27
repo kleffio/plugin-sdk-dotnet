@@ -6,6 +6,7 @@ public static class Capabilities
     public const string UIManifest = "ui.manifest";
     public const string APIRoutes = "api.routes";
     public const string IdentityProvider = "identity.provider";
+    public const string IdentityFramework = "identity.framework";
 }
 
 public static class Tags

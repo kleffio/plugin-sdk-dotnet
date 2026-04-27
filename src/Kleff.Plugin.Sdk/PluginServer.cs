@@ -1,60 +1,53 @@
-using Grpc.Core;
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using Kleff.Plugin.Sdk.Internal;
-using Kleff.Plugin.Sdk.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Kleff.Plugin.Sdk;
 
 public static class PluginServer
 {
-    /// <summary>
-    /// Starts a gRPC server for the given plugin, auto-registering services
-    /// based on which interfaces the plugin implements. Blocks until SIGTERM or Ctrl+C.
-    /// </summary>
-    public static async Task ServeAsync(BasePlugin plugin, CancellationToken cancellationToken = default)
+    public static async Task ServeAsync<TPlugin>(string[] args)
+        where TPlugin : KleffPlugin
     {
         var port = int.Parse(Environment.GetEnvironmentVariable("PORT") ?? "50051");
 
-        var server = new Server();
-        server.Services.Add(ServiceDefinitions.BuildHealth(plugin));
+        var builder = WebApplication.CreateBuilder(args);
+        builder.Logging.ClearProviders();
+        builder.Logging.AddSimpleConsole(o => o.SingleLine = true);
 
-        if (plugin is IUIPlugin ui)
-            server.Services.Add(ServiceDefinitions.BuildUI(ui));
-        if (plugin is IMiddlewarePlugin middleware)
-            server.Services.Add(ServiceDefinitions.BuildMiddleware(middleware));
-        if (plugin is IRoutesPlugin routes)
-            server.Services.Add(ServiceDefinitions.BuildHTTP(routes));
-        if (plugin is IIdentityPlugin identity)
-            server.Services.Add(ServiceDefinitions.BuildIdentity(identity));
+        builder.Services.AddGrpc();
+        builder.Services.AddSingleton<KleffPlugin, TPlugin>();
 
-        var credentials = BuildCredentials();
-        server.Ports.Add(new ServerPort("0.0.0.0", port, credentials));
-        server.Start();
-
-        var mode = credentials == ServerCredentials.Insecure ? "insecure" : "mTLS";
-        Console.WriteLine($"[kleff] plugin gRPC server listening on :{port} ({mode})");
-
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => linked.Cancel();
-        Console.CancelKeyPress += (_, e) => { e.Cancel = true; linked.Cancel(); };
-
-        try
+        builder.WebHost.ConfigureKestrel(opts =>
         {
-            await Task.Delay(Timeout.Infinite, linked.Token);
-        }
-        catch (OperationCanceledException) { }
+            opts.Listen(IPAddress.Any, port, endpoint =>
+            {
+                var cert = Environment.GetEnvironmentVariable("PLUGIN_TLS_CERT_PEM");
+                var key  = Environment.GetEnvironmentVariable("PLUGIN_TLS_KEY_PEM");
+                if (!string.IsNullOrEmpty(cert) && !string.IsNullOrEmpty(key))
+                    endpoint.UseHttps(X509Certificate2.CreateFromPem(cert, key));
+                else
+                    endpoint.Protocols = HttpProtocols.Http2;
+            });
+        });
 
-        Console.WriteLine("[kleff] shutting down...");
-        await server.ShutdownAsync();
-    }
+        var app = builder.Build();
+        app.MapGrpcService<HealthBridge>();
+        app.MapGrpcService<UIManifestBridge>();
+        app.MapGrpcService<APIMiddlewareBridge>();
+        app.MapGrpcService<APIRoutesBridge>();
+        app.MapGrpcService<IdentityProviderBridge>();
+        app.MapGrpcService<IdentityFrameworkBridge>();
 
-    private static ServerCredentials BuildCredentials()
-    {
-        var cert = Environment.GetEnvironmentVariable("PLUGIN_TLS_CERT_PEM");
-        var key = Environment.GetEnvironmentVariable("PLUGIN_TLS_KEY_PEM");
+        var mode = string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PLUGIN_TLS_CERT_PEM"))
+            ? "insecure" : "mTLS";
+        Console.WriteLine($"[kleff] plugin listening on :{port} ({mode})");
 
-        if (string.IsNullOrEmpty(cert) || string.IsNullOrEmpty(key))
-            return ServerCredentials.Insecure;
-
-        return new SslServerCredentials([new KeyCertificatePair(cert, key)]);
+        await app.RunAsync();
     }
 }

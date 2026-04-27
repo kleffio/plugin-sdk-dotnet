@@ -8,8 +8,34 @@
     <AssemblyName>Kleff.Plugin.Sdk</AssemblyName>
   </PropertyGroup>
 
+  <!-- ASP.NET Core shared framework for WebApplication + Kestrel -->
   <ItemGroup>
-    <PackageReference Include="Grpc.Core" Version="2.46.6" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.65.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.65.0" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Absolute path to contracts submodule proto root (Grpc.Tools rejects relative paths with ..) -->
+  <PropertyGroup>
+    <_ProtoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../contracts/proto'))</_ProtoRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Protobuf Include="$(_ProtoRoot)/common.proto"
+              ProtoRoot="$(_ProtoRoot)" GrpcServices="Server" />
+    <Protobuf Include="$(_ProtoRoot)/ui/manifest.proto"
+              ProtoRoot="$(_ProtoRoot)" GrpcServices="Server" />
+    <Protobuf Include="$(_ProtoRoot)/api/middleware.proto"
+              ProtoRoot="$(_ProtoRoot)" GrpcServices="Server" />
+    <Protobuf Include="$(_ProtoRoot)/api/routes.proto"
+              ProtoRoot="$(_ProtoRoot)" GrpcServices="Server" />
+    <Protobuf Include="$(_ProtoRoot)/identity/provider.proto"
+              ProtoRoot="$(_ProtoRoot)" GrpcServices="Server" />
+    <Protobuf Include="$(_ProtoRoot)/identity/framework.proto"
+              ProtoRoot="$(_ProtoRoot)" GrpcServices="Server" />
   </ItemGroup>
 
 </Project>
